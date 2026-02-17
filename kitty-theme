@@ -1,0 +1,38 @@
+#!/bin/bash
+THEMES_DIR="$HOME/.config/kitty/kitty-themes/themes"
+THEME_LINK="$HOME/.config/kitty/theme.conf"
+
+if [ -z "$1" ] || [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+    echo "Current theme: $(basename "$(readlink "$THEME_LINK")" .conf)"
+    echo ""
+    echo "Usage: kitty-theme <name>    Switch to a theme"
+    echo "       kitty-theme --list    List all available themes"
+    echo "       kitty-theme --search  Search themes by keyword"
+    exit 0
+fi
+
+if [ "$1" = "--list" ]; then
+    ls "$THEMES_DIR" | sed 's/\.conf$//'
+    exit 0
+fi
+
+if [ "$1" = "--search" ]; then
+    if [ -z "$2" ]; then
+        echo "Usage: kitty-theme --search <keyword>"
+        exit 1
+    fi
+    ls "$THEMES_DIR" | sed 's/\.conf$//' | grep -i "$2"
+    exit 0
+fi
+
+THEME_FILE="$THEMES_DIR/$1.conf"
+
+if [ ! -f "$THEME_FILE" ]; then
+    echo "Theme '$1' not found. Similar themes:"
+    ls "$THEMES_DIR" | sed 's/\.conf$//' | grep -i "$1"
+    exit 1
+fi
+
+ln -sf "$THEME_FILE" "$THEME_LINK"
+echo "Switched to: $1"
+echo "Open a new kitty window to see the change."

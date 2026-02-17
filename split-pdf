@@ -1,0 +1,85 @@
+#!/usr/bin/env python3
+"""Split a large PDF into N evenly-sized chunks, preserving all pages."""
+"""Usage
+
+  # Split a 2000-page PDF into 4 chunks
+  split-pdf massive-report.pdf 4
+
+  # Split into 10 chunks, output to specific directory
+  split-pdf massive-report.pdf 10 -o ~/chunks/
+
+  # Output:
+  #   massive-report_chunk1_p1-200.pdf    (200 pages)
+  #   massive-report_chunk2_p201-400.pdf  (200 pages)
+  #   ...
+  #   massive-report_chunk10_p1801-2000.pdf (200 pages) """
+
+import argparse
+import math
+import sys
+from pathlib import Path
+
+from pypdf import PdfReader, PdfWriter
+
+
+def split_pdf(input_path: str, num_chunks: int, output_dir: str | None = None) -> list[str]:
+    src = Path(input_path)
+    if not src.exists():
+        print(f"Error: {src} not found", file=sys.stderr)
+        sys.exit(1)
+
+    reader = PdfReader(str(src))
+    total_pages = len(reader.pages)
+
+    if num_chunks < 1:
+        print("Error: chunk count must be at least 1", file=sys.stderr)
+        sys.exit(1)
+
+    if num_chunks > total_pages:
+        print(f"Error: chunk count ({num_chunks}) exceeds page count ({total_pages})", file=sys.stderr)
+        sys.exit(1)
+
+    out_dir = Path(output_dir) if output_dir else src.parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stem = src.stem
+
+    chunk_size = math.ceil(total_pages / num_chunks)
+    output_files = []
+
+    for i in range(num_chunks):
+        start = i * chunk_size
+        end = min(start + chunk_size, total_pages)
+        if start >= total_pages:
+            break
+
+        writer = PdfWriter()
+        for page_num in range(start, end):
+            writer.add_page(reader.pages[page_num])
+
+        out_name = f"{stem}_chunk{i + 1}_p{start + 1}-{end}.pdf"
+        out_path = out_dir / out_name
+        writer.write(str(out_path))
+        output_files.append(str(out_path))
+
+        print(f"  [{i + 1}/{num_chunks}] {out_name}  ({end - start} pages: {start + 1}-{end})")
+
+    print(f"\nDone: {total_pages} pages -> {len(output_files)} chunks in {out_dir}")
+    return output_files
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Split a PDF into N evenly-sized chunks",
+        epilog="Example: split-pdf report.pdf 4",
+    )
+    parser.add_argument("pdf", help="Path to the input PDF file")
+    parser.add_argument("chunks", type=int, help="Number of chunks to split into")
+    parser.add_argument("-o", "--output-dir", help="Output directory (default: same as input)")
+    args = parser.parse_args()
+
+    print(f"Splitting {args.pdf} into {args.chunks} chunks...")
+    split_pdf(args.pdf, args.chunks, args.output_dir)
+
+
+if __name__ == "__main__":
+    main()

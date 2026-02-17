@@ -1,0 +1,76 @@
+#!/bin/bash
+# ncmpcpp wrapper with Kitty icat album art display
+# Displays cover art in a side pane using a tmux-like split approach
+
+COVER_TMP="/tmp/mpd_cover.jpg"
+MUSIC_DIR="$HOME/Music"
+FALLBACK="$HOME/.ncmpcpp/ncmpcpp-icat/img/fallback.png"
+
+cleanup() {
+    # Clear any icat images from terminal
+    kitten icat --clear --silent 2>/dev/null
+    # Kill our background cover art watcher
+    [ -n "$WATCHER_PID" ] && kill "$WATCHER_PID" 2>/dev/null
+    # Reset terminal state
+    tput reset 2>/dev/null
+}
+
+trap cleanup EXIT INT TERM
+
+# Background watcher: polls for cover art changes and displays them
+cover_watcher() {
+    local last_song=""
+    while true; do
+        local current
+        current="$(mpc --format "%file%" current 2>/dev/null)"
+
+        if [ "$current" != "$last_song" ] && [ -n "$current" ]; then
+            last_song="$current"
+            local full_path="$MUSIC_DIR/$current"
+            local dir
+            dir="$(dirname "$full_path")"
+
+            # Try embedded art
+            local found_art=false
+            ffmpeg -y -i "$full_path" -an -vcodec copy "$COVER_TMP" 2>/dev/null && found_art=true
+
+            # Try directory cover files
+            if [ "$found_art" = false ]; then
+                local cover
+                cover="$(find "$dir" -maxdepth 1 -type f -iregex '.*\(cover\|folder\|artwork\|front\|album\).*\.\(jpe?g\|png\|gif\|bmp\|webp\)' 2>/dev/null | head -n1)"
+                if [ -n "$cover" ]; then
+                    cp "$cover" "$COVER_TMP"
+                    found_art=true
+                fi
+            fi
+
+            # Fallback
+            if [ "$found_art" = false ]; then
+                cp "$FALLBACK" "$COVER_TMP" 2>/dev/null
+            fi
+
+            # Display with kitten icat in the terminal
+            if [ -f "$COVER_TMP" ]; then
+                kitten icat --clear --silent 2>/dev/null
+                kitten icat \
+                    --silent \
+                    --scale-up \
+                    --align right \
+                    --place "40x40@0x2" \
+                    --stdin no \
+                    --transfer-mode file \
+                    "$COVER_TMP" 2>/dev/null
+            fi
+        fi
+        sleep 2
+    done
+}
+
+# Start cover art watcher in background
+cover_watcher &
+WATCHER_PID=$!
+
+# Run ncmpcpp in foreground
+ncmpcpp "$@"
+
+# Cleanup runs via trap
