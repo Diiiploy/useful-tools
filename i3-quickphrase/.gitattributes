@@ -1,0 +1,6 @@
+# Default: let git auto-detect text vs binary
+* text=auto
+
+# Phrase files: treat as binary (no LF normalization, no whitespace cleanup).
+# A trailing space is intentional and part of the typed output.
+phrases/*.txt -text

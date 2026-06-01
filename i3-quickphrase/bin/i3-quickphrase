@@ -1,0 +1,256 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# i3-quickphrase — bind i3 keys to type fixed phrases into the focused window
+# https://github.com/cr4shOverr1de/i3-quickphrase
+
+set -euo pipefail
+
+VERSION="0.1.6"
+PROG="i3-quickphrase"
+
+# Resolve repo root via the symlink target so this works whether the user
+# invokes the script directly or through the installed symlink.
+SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+REPO_ROOT="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)"
+PHRASES_DIR="$REPO_ROOT/phrases"
+LIB_DIR="$REPO_ROOT/lib"
+LOCK_DIR="${XDG_RUNTIME_DIR:-/tmp}/i3-quickphrase"
+
+# Inter-space settle time (seconds). See the injection block below for
+# the full rationale. Override at runtime via the environment variable
+# I3_QUICKPHRASE_SPACE_SETTLE (e.g. "0.2" for 200 ms, "0" to disable).
+#
+# Tuning history:
+#   v0.1.4: default 0.05 s (50 ms)  — still tripped the detector.
+#   v0.1.5: default 0.15 s (150 ms) — reliable, but slow (~2.0 s total).
+#   v0.1.6: default 0.10 s (100 ms) — verified sufficient, ~1.6 s total.
+# Worst-case inter-space gap at 100 ms is ~125 ms — ~4× X11's default
+# 30 ms key-repeat rate, just past the detector's sensitivity window.
+# If you see the rainbow cursor / dropped spaces on your setup, bump
+# via the env var (try 0.15 then 0.2) before opening an issue.
+SPACE_SETTLE="${I3_QUICKPHRASE_SPACE_SETTLE:-0.1}"
+
+# Source the validator
+# shellcheck source=../lib/validate.sh
+if [[ -f "$LIB_DIR/validate.sh" ]]; then
+  source "$LIB_DIR/validate.sh"
+else
+  echo "$PROG: missing $LIB_DIR/validate.sh" >&2
+  exit 1
+fi
+
+err()  { echo "$PROG: $*" >&2; }
+
+die() {
+  err "$1"
+  if command -v notify-send >/dev/null 2>&1; then
+    notify-send -a "$PROG" "$PROG error" "$1" >/dev/null 2>&1 || true
+  fi
+  exit 1
+}
+
+usage() {
+  cat <<EOF
+$PROG $VERSION — bind i3 keys to type fixed phrases
+
+Usage:
+  $PROG <phrase-name>     Type the phrase named <phrase-name> into the focused window
+  $PROG doctor            Run diagnostics
+  $PROG --version         Print version
+  $PROG --help            Print this message
+
+Phrases live in: $PHRASES_DIR
+
+Add a phrase:
+  printf 'Your phrase ' > $PHRASES_DIR/yourname.txt
+  echo 'bindsym --release \$mod+x exec --no-startup-id ~/.local/bin/$PROG yourname' \\
+       >> $REPO_ROOT/dist/i3-quickphrase.conf
+  i3-msg reload
+
+Environment:
+  I3_QUICKPHRASE_ALLOWED_CLASSES   Comma-separated allowlist of window classes.
+                                   Default: '*' (allow any). Example: 'kitty,Firefox'.
+EOF
+}
+
+doctor() {
+  echo "$PROG $VERSION doctor"
+  echo "Repo:        $REPO_ROOT"
+  echo "Phrases dir: $PHRASES_DIR"
+  echo "Lock dir:    $LOCK_DIR"
+  echo
+  echo "Dependencies:"
+  for cmd in xdotool xprop notify-send i3-msg flock stat; do
+    if command -v "$cmd" >/dev/null 2>&1; then
+      echo "  [ok]      $cmd: $(command -v "$cmd")"
+    else
+      echo "  [MISSING] $cmd"
+    fi
+  done
+  echo
+  echo "Phrases:"
+  if [[ -d "$PHRASES_DIR" ]]; then
+    local found=0
+    local f
+    for f in "$PHRASES_DIR"/*.txt; do
+      [[ -e "$f" ]] || continue
+      found=1
+      local size name
+      size="$(wc -c <"$f")"
+      name="$(basename "$f" .txt)"
+      if validate_phrase_file "$f" 2>/dev/null; then
+        echo "  [ok]      $name ($size bytes)"
+      else
+        echo "  [INVALID] $name ($size bytes) — see validate output"
+      fi
+    done
+    if [[ "$found" -eq 0 ]]; then
+      echo "  (no phrases)"
+    fi
+  else
+    echo "  (phrases dir missing)"
+  fi
+  echo
+  if [[ -n "${DISPLAY:-}" ]]; then
+    echo "DISPLAY:     $DISPLAY"
+  else
+    echo "DISPLAY:     (unset — xdotool will not work)"
+  fi
+  if command -v xdotool >/dev/null 2>&1; then
+    local id
+    id="$(xdotool getactivewindow 2>/dev/null || true)"
+    if [[ -n "$id" ]]; then
+      echo "Active id:   $id"
+      if command -v xprop >/dev/null 2>&1; then
+        local wmclass
+        wmclass="$(xprop -id "$id" WM_CLASS 2>/dev/null || true)"
+        echo "Active class: ${wmclass:-unknown}"
+      fi
+    fi
+  fi
+  echo
+  echo "Allowlist:   ${I3_QUICKPHRASE_ALLOWED_CLASSES:-* (any window)}"
+}
+
+# ---- argument dispatch ----
+case "${1:-}" in
+  ""|-h|--help) usage; exit 0 ;;
+  --version)    echo "$PROG $VERSION"; exit 0 ;;
+  doctor)       doctor; exit 0 ;;
+esac
+
+# ---- main: type a phrase ----
+phrase_name="$1"
+
+validate_phrase_name "$phrase_name" || die "invalid phrase name: $phrase_name"
+
+phrase_file="$PHRASES_DIR/$phrase_name.txt"
+validate_phrase_file "$phrase_file" || die "phrase file failed validation: $phrase_file"
+
+# Need DISPLAY for xdotool
+if [[ -z "${DISPLAY:-}" ]]; then
+  die "DISPLAY is unset (Wayland or no X server)"
+fi
+
+# Capture active window NOW (defeats focus drift between check and type)
+active_id="$(xdotool getactivewindow 2>/dev/null || true)"
+[[ -n "$active_id" ]] || die "no active window detected"
+
+# Optional window-class allowlist
+allowed="${I3_QUICKPHRASE_ALLOWED_CLASSES:-*}"
+if [[ "$allowed" != "*" ]]; then
+  if ! command -v xprop >/dev/null 2>&1; then
+    die "I3_QUICKPHRASE_ALLOWED_CLASSES is set but xprop is not installed"
+  fi
+  # WM_CLASS is reported as: WM_CLASS(STRING) = "instance", "class"
+  # We grab the second quoted string (the class).
+  active_class="$(xprop -id "$active_id" WM_CLASS 2>/dev/null \
+                  | sed -n 's/.*"\([^"]*\)"$/\1/p')"
+  if [[ -z "$active_class" ]]; then
+    die "could not determine active window class"
+  fi
+  if ! echo "$allowed" | tr ',' '\n' | grep -qFx "$active_class"; then
+    die "focused window class '$active_class' not in allowlist '$allowed'"
+  fi
+fi
+
+# Single-shot guard via flock (prevents key-repeat double-fire)
+mkdir -p "$LOCK_DIR"
+exec 9>"$LOCK_DIR/$phrase_name.lock"
+if ! flock -n 9; then
+  # Another invocation is in flight — exit silently to avoid duplicate typing
+  exit 0
+fi
+
+# Defeat the held-modifier race: explicitly release any modifier keys
+# before typing. This is more reliable than xdotool's --clearmodifiers,
+# which has a known "restore" bug (xdotool#43) where it re-presses
+# modifiers at the end of typing — leaving them stuck if the user has
+# already released them physically.
+xdotool keyup Alt_L Alt_R Control_L Control_R Shift_L Shift_R Super_L Super_R 2>/dev/null || true
+
+# Tiny propagation delay so the synthetic keyup events land before xdotool
+# starts pumping characters into X11's event queue.
+sleep 0.03
+
+# Inject the phrase. --window targets the captured id (focus-drift safe).
+#
+# v0.1.3 split emission into two paths: non-space runs through
+# `xdotool type` (12 ms/char) and each space through
+# `xdotool key --delay 0 space`. This was to defeat Claude Code's
+# push-to-talk voice mode, which retroactively removes the 1-2 most
+# recent spaces from its prompt buffer when it detects a "held space."
+# `xdotool type` holds each synthetic KeyPress open for several
+# milliseconds (xdotool v3.20160805.1's chardelay floor plus X11
+# XSync + XkbLockGroup + XFlush roundtrip); `xdotool key` emits
+# KeyPress and KeyRelease back-to-back through a single XTEST call
+# pair with no intra-pair sleep, so the press-release dwell drops to
+# sub-millisecond.
+#
+# v0.1.4 added a post-space settle sleep of $SPACE_SETTLE seconds to
+# the emission loop. The failure mode is not the press-release dwell
+# (already tightest possible with xdotool) — it is the gap between
+# adjacent SPACE EVENTS. For a single-character word typed at
+# --delay 12 plus xdotool process-startup overhead, consecutive
+# spaces arrive about 25 ms apart, which is inside X11's default
+# 30 ms key-repeat window and looks like a held key to Claude Code's
+# repeat-based detector.
+#
+# v0.1.5 raised the default settle from 0.05 s to 0.15 s after 50 ms
+# proved too tight (inter-space gap of ~75 ms was still inside the
+# detector's window). v0.1.6 trims the default to 0.1 s (100 ms) —
+# verified sufficient in practice and ~650 ms faster per phrase than
+# 0.15. Worst-case inter-space gap at 100 ms: ~125 ms. Tune further
+# via the I3_QUICKPHRASE_SPACE_SETTLE env var.
+#
+# Per-run `--file -` (stdin) keeps the byte-literal, no-argv-leak
+# invariant from v0.1.0 for every word. The character loop preserves
+# leading spaces, trailing spaces, and back-to-back spaces exactly
+# (`awk RS=" "` drops the trailing empty field on some awks, so a
+# pure-bash loop is used instead).
+#
+# Refs:
+#   https://github.com/anthropics/claude-code/issues/37932
+#   https://github.com/jordansissel/xdotool/blob/v3.20160805.1/xdo.c#L958
+#   https://code.claude.com/docs/en/voice-dictation
+phrase="$(<"$phrase_file")"
+len="${#phrase}"
+buffer=""
+for (( i=0; i<len; i++ )); do
+  ch="${phrase:$i:1}"
+  if [[ "$ch" == " " ]]; then
+    if [[ -n "$buffer" ]]; then
+      printf '%s' "$buffer" \
+        | xdotool type --delay 12 --window "$active_id" --file -
+      buffer=""
+    fi
+    xdotool key --delay 0 --window "$active_id" space
+    sleep "$SPACE_SETTLE"
+  else
+    buffer+="$ch"
+  fi
+done
+if [[ -n "$buffer" ]]; then
+  printf '%s' "$buffer" \
+    | xdotool type --delay 12 --window "$active_id" --file -
+fi

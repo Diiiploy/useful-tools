@@ -91,20 +91,33 @@ kitty-theme
 ncmpcpp-icat
 ```
 
+## Bundled Projects
+
+| Project | Description |
+|---------|-------------|
+| `i3-quickphrase/` | Source backup of [i3-quickphrase](https://github.com/cr4shOverr1de/i3-quickphrase) — bind i3 keys to type fixed phrases into the focused window. It has its own installer; run `i3-quickphrase/install.sh` to set it up. The canonical, version-tracked copy lives in its own repo. |
+
 ## Installation
 
-Clone the repo and symlink or copy the tools you want into your PATH:
+Clone the repo, then let `install.sh` symlink every executable tool into `~/.local/bin`:
 
 ```bash
-git clone git@github.com:Diiiploy/useful-tools.git
+git clone git@github.com:cr4shOverr1de/useful-tools.git
 cd useful-tools
 
-# Symlink a tool into your PATH
-ln -s "$(pwd)/dlmusic" ~/.local/bin/dlmusic
-ln -s "$(pwd)/split-pdf" ~/.local/bin/split-pdf
+./install.sh           # symlink all executable tools into ~/.local/bin
+./install.sh -n        # dry run — preview without changing anything
+./install.sh -f        # overwrite existing files/symlinks
+./install.sh -d ~/bin  # install into a different directory
 ```
 
-A few tools want extra files in specific locations:
+`install.sh` only links the root-level executable scripts — it skips this README, the `LICENSE`, the `md2pdf-style.html` stylesheet, and the `claude-code/` and `i3-quickphrase/` subdirectories. Prefer to do it by hand? Symlink individual tools instead:
+
+```bash
+ln -s "$(pwd)/dlmusic" ~/.local/bin/dlmusic
+```
+
+A few tools want extra files in specific locations (the installer prints these reminders too):
 
 ```bash
 # md2pdf's optional stylesheet
