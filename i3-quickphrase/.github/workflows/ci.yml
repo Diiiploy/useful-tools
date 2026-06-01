@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -yq shellcheck
+      - name: Run shellcheck
+        run: |
+          shellcheck -S error \
+            bin/i3-quickphrase \
+            lib/validate.sh \
+            install.sh \
+            uninstall.sh
+
+  phrase-content-allowlist:
+    name: phrase content allowlist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject non-printable bytes in phrases
+        run: |
+          set -e
+          fail=0
+          for f in phrases/*.txt; do
+            [ -e "$f" ] || continue
+            if LC_ALL=C grep -q -P '[\x00-\x08\x0b-\x1f\x7f-\xff]' "$f"; then
+              echo "::error file=$f::contains non-printable bytes"
+              fail=1
+            fi
+          done
+          exit $fail
+
+  bidi-control-scan:
+    name: bidi control scan (Trojan Source)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -yq ripgrep
+      - name: Scan for bidi control characters
+        run: |
+          if rg -lP '[\x{202a}-\x{202e}\x{2066}-\x{2069}\x{200b}-\x{200f}]' \
+                phrases/ bin/ lib/ install.sh uninstall.sh 2>/dev/null; then
+            echo "::error::bidi/zero-width control characters detected (CVE-2021-42574)"
+            exit 1
+          fi

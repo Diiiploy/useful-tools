@@ -1,0 +1,21 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 2
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.sh]
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
+
+# Phrase files must preserve trailing spaces and must NOT have a final newline.
+# The trailing space is part of the typed output; a final newline would type Enter.
+[phrases/*.txt]
+insert_final_newline = false
+trim_trailing_whitespace = false
