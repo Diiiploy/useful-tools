@@ -1,0 +1,128 @@
+<style>
+/* md2pdf-style.html — Drop-in style for pandoc + chromium PDF conversion */
+/* Place at: ~/.local/share/pandoc/md2pdf-style.html */
+
+@page {
+  margin: 2cm;
+  size: letter;
+}
+
+body {
+  font-family: "Noto Sans", -apple-system, BlinkMacSystemFont, sans-serif;
+  max-width: 100%;
+  margin: 0 auto;
+  padding: 0;
+  line-height: 1.7;
+  color: #1a1a1a;
+  font-size: 13px;
+}
+
+h1 {
+  border-bottom: 2px solid #2563eb;
+  padding-bottom: 8px;
+  color: #1e3a5f;
+  font-size: 1.8em;
+  margin-top: 1.5em;
+}
+
+h2 {
+  border-bottom: 1px solid #d1d5db;
+  padding-bottom: 5px;
+  color: #1e3a5f;
+  font-size: 1.4em;
+  margin-top: 1.3em;
+}
+
+h3 {
+  color: #374151;
+  font-size: 1.15em;
+  margin-top: 1.2em;
+}
+
+code {
+  background: #f3f4f6;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: "Fira Code", "Noto Sans Mono", "DejaVu Sans Mono", monospace;
+  font-size: 0.88em;
+}
+
+pre {
+  background: #1e293b;
+  color: #e2e8f0;
+  padding: 16px;
+  border-radius: 8px;
+  overflow-x: auto;
+  font-size: 0.85em;
+  line-height: 1.5;
+}
+
+pre code {
+  background: none;
+  padding: 0;
+  color: inherit;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 16px 0;
+  font-size: 0.95em;
+}
+
+th, td {
+  border: 1px solid #d1d5db;
+  padding: 8px 12px;
+  text-align: left;
+}
+
+th {
+  background: #f1f5f9;
+  font-weight: 600;
+  color: #1e3a5f;
+}
+
+tr:nth-child(even) {
+  background: #f9fafb;
+}
+
+blockquote {
+  border-left: 4px solid #3b82f6;
+  margin: 16px 0;
+  padding: 12px 20px;
+  background: #eff6ff;
+  color: #1e40af;
+}
+
+ul, ol {
+  padding-left: 24px;
+}
+
+li {
+  margin: 4px 0;
+}
+
+a {
+  color: #2563eb;
+  text-decoration: none;
+}
+
+hr {
+  border: none;
+  border-top: 1px solid #e5e7eb;
+  margin: 24px 0;
+}
+
+img {
+  max-width: 100%;
+}
+
+/* Prevent page breaks inside code blocks and tables */
+pre, table, blockquote {
+  page-break-inside: avoid;
+}
+
+h1, h2, h3 {
+  page-break-after: avoid;
+}
+</style>

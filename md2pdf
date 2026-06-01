@@ -1,0 +1,54 @@
+#!/bin/bash
+# md2pdf — Convert Markdown to PDF via pandoc + chromium headless
+# Handles emoji, Unicode, tables, code blocks perfectly
+# Usage: md2pdf input.md [output.pdf]
+
+set -euo pipefail
+
+INPUT="${1:-}"
+OUTPUT="${2:-}"
+STYLE_FILE="$HOME/.local/share/pandoc/md2pdf-style.html"
+
+if [ -z "$INPUT" ]; then
+    echo "Usage: md2pdf <input.md> [output.pdf]"
+    echo ""
+    echo "Converts Markdown to PDF with full emoji/Unicode support."
+    echo "Style: $STYLE_FILE"
+    exit 1
+fi
+
+if [ ! -f "$INPUT" ]; then
+    echo "Error: File not found: $INPUT"
+    exit 1
+fi
+
+# Default output: same name as input with .pdf extension
+if [ -z "$OUTPUT" ]; then
+    OUTPUT="${INPUT%.md}.pdf"
+fi
+
+TMPHTML=$(mktemp /tmp/md2pdf-XXXXXX.html)
+trap 'rm -f "$TMPHTML"' EXIT
+
+# Check for style file
+STYLE_ARG=""
+if [ -f "$STYLE_FILE" ]; then
+    STYLE_ARG="--include-in-header=$STYLE_FILE"
+fi
+
+# Step 1: Markdown → HTML (via pandoc)
+pandoc "$INPUT" -o "$TMPHTML" \
+    --standalone \
+    $STYLE_ARG \
+    --metadata title=" " \
+    --highlight-style=tango \
+    2>/dev/null
+
+# Step 2: HTML → PDF (via chromium headless)
+chromium --headless --disable-gpu --no-sandbox \
+    --print-to-pdf="$OUTPUT" \
+    --print-to-pdf-no-header \
+    "$TMPHTML" \
+    2>/dev/null
+
+echo "$(basename "$INPUT") → $(basename "$OUTPUT") ($(du -h "$OUTPUT" | cut -f1))"

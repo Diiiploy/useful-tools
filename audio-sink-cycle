@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# audio-sink-cycle — cycle the PipeWire default sink through:
+#   1) Analog headphones (3.5mm jack on Built-in Audio)
+#   2) HDMI Display (LG ULTRAWIDE)
+#   3) Each currently-connected Bluetooth audio sink
+#
+# Handles the ACP profile switch when moving between Analog and HDMI on the
+# Built-in Audio card (mutually exclusive output ports), then moves all active
+# streams to the new default and pops a dunstify toast.
+
+set -e
+
+CARD=alsa_card.pci-0000_00_1f.3
+ANALOG_PROFILE=output:analog-stereo+input:analog-stereo
+HDMI_PROFILE=output:hdmi-stereo+input:analog-stereo
+ANALOG_SINK=alsa_output.pci-0000_00_1f.3.analog-stereo
+HDMI_SINK=alsa_output.pci-0000_00_1f.3.hdmi-stereo
+
+# TARGETS entries: SINK|PROFILE|LABEL    (PROFILE empty = no profile switch)
+declare -a TARGETS
+TARGETS+=("$ANALOG_SINK|$ANALOG_PROFILE|󰋋 Analog Headphones")
+TARGETS+=("$HDMI_SINK|$HDMI_PROFILE|󰍹 HDMI Display")
+
+# Append any currently-connected bluez sinks
+while IFS=$'\t' read -r _ NAME _ _ _; do
+    [[ "$NAME" == bluez_output.* ]] || continue
+    MAC_UND="${NAME#bluez_output.}"; MAC_UND="${MAC_UND%%.*}"
+    MAC="${MAC_UND//_/:}"
+    DEV_NAME="$(bluetoothctl info "$MAC" 2>/dev/null | awk -F': ' '/^[[:space:]]*Name:/{print $2; exit}')"
+    [[ -z "$DEV_NAME" ]] && DEV_NAME="$MAC"
+    TARGETS+=("$NAME||󰂯 $DEV_NAME")
+done < <(pactl list sinks short)
+
+CURRENT="$(pactl get-default-sink)"
+N=${#TARGETS[@]}
+NEXT_IDX=0
+for i in "${!TARGETS[@]}"; do
+    IFS='|' read -r SINK _ _ <<< "${TARGETS[$i]}"
+    if [[ "$CURRENT" == "$SINK" ]]; then
+        NEXT_IDX=$(( (i + 1) % N ))
+        break
+    fi
+done
+
+IFS='|' read -r SINK PROF LABEL <<< "${TARGETS[$NEXT_IDX]}"
+
+# Switch ACP profile if the target lives on the HDA card and needs a different one
+if [[ -n "$PROF" ]]; then
+    CUR_PROF="$(pactl list cards | awk '/Name: '"$CARD"'/{f=1} f && /Active Profile:/{print $3; exit}')"
+    if [[ "$CUR_PROF" != "$PROF" ]]; then
+        pactl set-card-profile "$CARD" "$PROF"
+        # Wait up to 2s for the new sink to materialize
+        for _ in $(seq 1 20); do
+            pactl list sinks short | awk '{print $2}' | grep -qx "$SINK" && break
+            sleep 0.1
+        done
+    fi
+fi
+
+if ! pactl set-default-sink "$SINK" 2>/dev/null; then
+    dunstify -a "Audio Sink" -r 2594 -i audio-volume-muted -u critical \
+        "Sink switch failed" "$LABEL not available."
+    exit 1
+fi
+
+# Move every currently-playing stream onto the new default
+while IFS=$'\t' read -r ID _; do
+    [[ -n "$ID" ]] && pactl move-sink-input "$ID" "$SINK" >/dev/null 2>&1 || true
+done < <(pactl list sink-inputs short)
+
+dunstify -a "Audio Sink" -r 2594 -i audio-card -u normal "Output → $LABEL"
